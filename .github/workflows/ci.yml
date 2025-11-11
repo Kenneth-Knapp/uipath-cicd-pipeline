@@ -1,4 +1,3 @@
-$new = @"
 name: CI
 
 on:
@@ -22,5 +21,3 @@ jobs:
       - name: Placeholder for UiPath steps
         run: |
           echo "✅ CI is wired. UiPath packaging/analysis will be added next."
-"@
-$new | Set-Content -Encoding UTF8 .github/workflows/ci.yml
