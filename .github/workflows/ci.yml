@@ -1,0 +1,26 @@
+$new = @"
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs:
+  smoke:
+    name: CI smoke
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show repo structure
+        run: |
+          echo "Listing repo..."
+          dir
+
+      - name: Placeholder for UiPath steps
+        run: |
+          echo "✅ CI is wired. UiPath packaging/analysis will be added next."
+"@
+$new | Set-Content -Encoding UTF8 .github/workflows/ci.yml
