@@ -34,13 +34,12 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      # Official-ish community action that installs UiPath CLI (uipcli) and adds it to PATH
+      # Official action: installs UiPath.CLI.Windows from the UiPath-Official feed
       - name: Setup UiPath CLI
         uses: Mikael-RnD/setup-uipath@v2
         with:
-          # This ties the CLI version to UiPath platform version (Studio/Robot).
-          # You can adjust this later if your environment is on a different major/minor.
-          platform-version: '25.10'
+          # This version is straight from the docs and known to exist in the feed
+          version: 24.12.9111.31003
 
       - name: Package the project
         run: |
