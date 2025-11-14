@@ -34,15 +34,17 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Download UiPath CLI
-        run: |
-          curl -L "https://www.nuget.org/api/v3-flatcontainer/uipath.cli.windows/25.10.1-20251105-9/uipath.cli.windows.25.10.1-20251105-9.nupkg" -o uipath_cli.nupkg
-          mkdir cli
-          powershell -Command "Expand-Archive -Path 'uipath_cli.nupkg' -DestinationPath 'cli'"
+      # Official-ish community action that installs UiPath CLI (uipcli) and adds it to PATH
+      - name: Setup UiPath CLI
+        uses: Mikael-RnD/setup-uipath@v2
+        with:
+          # This ties the CLI version to UiPath platform version (Studio/Robot).
+          # You can adjust this later if your environment is on a different major/minor.
+          platform-version: '25.10'
 
       - name: Package the project
         run: |
-          .\cli\tools\uipcli.exe package pack "UiPathCICD" -o "dist"
+          uipcli package pack "UiPathCICD" -o "dist"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
