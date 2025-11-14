@@ -54,3 +54,29 @@ jobs:
         with:
           name: uipath-package
           path: dist/*.nupkg
+
+  analyze:
+    name: Workflow Analyzer
+    runs-on: windows-latest
+    needs: pack
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup UiPath CLI
+        uses: Mikael-RnD/setup-uipath@v2
+        with:
+          version: 24.12.9111.31003
+
+      - name: Run Workflow Analyzer
+        shell: pwsh
+        run: |
+          $workspace = $env:GITHUB_WORKSPACE
+          $projectPath = Join-Path $workspace "UiPathCICD"
+          Write-Host "Analyzing project at: $projectPath"
+          uipcli package analyze $projectPath --fail-on Error
