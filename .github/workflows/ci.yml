@@ -21,3 +21,31 @@ jobs:
       - name: Placeholder for UiPath steps
         run: |
           echo "✅ CI is wired. UiPath packaging/analysis will be added next."
+
+  pack:
+  name: Package UiPath Project
+  runs-on: windows-latest
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup .NET 8
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Download UiPath CLI
+      run: |
+        curl -L -o uipath_cli.nupkg https://www.nuget.org/api/v2/package/UiPath.CLI.Windows
+        mkdir cli
+        tar -xf uipath_cli.nupkg -C cli
+
+    - name: Package the project
+      run: |
+        .\cli\tools\uipcli.exe package pack "UiPathCICD" -o "dist"
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: uipath-package
+        path: dist/*.nupkg
