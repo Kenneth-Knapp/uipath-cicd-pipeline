@@ -79,4 +79,5 @@ jobs:
           $workspace = $env:GITHUB_WORKSPACE
           $projectPath = Join-Path $workspace "UiPathCICD"
           Write-Host "Analyzing project at: $projectPath"
-          uipcli package analyze $projectPath --fail-on Error
+          uipcli package analyze $projectPath --stopOnRuleViolation --treatWarningsAsErrors
+
