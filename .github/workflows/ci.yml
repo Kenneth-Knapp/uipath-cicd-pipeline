@@ -34,16 +34,20 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      # Official action: installs UiPath.CLI.Windows from the UiPath-Official feed
       - name: Setup UiPath CLI
         uses: Mikael-RnD/setup-uipath@v2
         with:
-          # This version is straight from the docs and known to exist in the feed
           version: 24.12.9111.31003
 
       - name: Package the project
+        shell: pwsh
         run: |
-          uipcli package pack "UiPathCICD" -o "dist"
+          $workspace = $env:GITHUB_WORKSPACE
+          $projectPath = Join-Path $workspace "UiPathCICD"
+          $outputPath = Join-Path $workspace "dist"
+          Write-Host "Project path: $projectPath"
+          Write-Host "Output path:  $outputPath"
+          uipcli package pack $projectPath -o $outputPath
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
