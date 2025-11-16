@@ -10,22 +10,6 @@ on:
     types: [closed]  # Trigger when PR to main is closed
 
 jobs:
-  smoke:
-    name: CI smoke
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Show repo structure
-        run: |
-          echo "Listing repo..."
-          dir
-
-      - name: Placeholder for UiPath steps
-        run: |
-          echo "✅ CI is wired. UiPath packaging/analysis will be added next."
-
   pack:
     name: Package UiPath Project
     runs-on: windows-latest
@@ -197,11 +181,9 @@ jobs:
         id: get-run
         shell: pwsh
         run: |
-          # Get the SHA from the PR's head (the feature branch that was merged)
           $headSha = "${{ github.event.pull_request.head.sha }}"
           Write-Host "Looking for workflow run with SHA: $headSha"
           
-          # Find the workflow run that built this commit
           $runsUrl = "https://api.github.com/repos/${{ github.repository }}/actions/runs?event=push&status=success&head_sha=$headSha"
           $headers = @{
             "Authorization" = "Bearer ${{ github.token }}"
@@ -225,7 +207,6 @@ jobs:
           $runId = "${{ steps.get-run.outputs.run_id }}"
           Write-Host "Downloading artifact from run ID: $runId"
           
-          # Get artifact list for the run
           $artifactsUrl = "https://api.github.com/repos/${{ github.repository }}/actions/runs/$runId/artifacts"
           $headers = @{
             "Authorization" = "Bearer ${{ github.token }}"
@@ -243,20 +224,18 @@ jobs:
           Write-Host "Found artifact ID: $($packageArtifact.id)"
           Write-Host "Downloading from: $($packageArtifact.archive_download_url)"
           
-          # Download the artifact
           $outputZip = "artifact.zip"
           Invoke-WebRequest -Uri $packageArtifact.archive_download_url -Headers $headers -OutFile $outputZip
           
-          # Extract to dist folder
           $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           Expand-Archive -Path $outputZip -DestinationPath $dist -Force
           
-          Write-Host "✅ Artifact downloaded and extracted successfully"
+          Write-Host "Artifact downloaded and extracted successfully"
           Write-Host "Contents of dist folder:"
           Get-ChildItem $dist
 
-      - name: Get package info
+      - name: Get package info for display
         id: pkg-info
         shell: pwsh
         run: |
@@ -271,7 +250,6 @@ jobs:
           $fileName = $nupkg.Name
           Write-Host "Package file: $fileName"
           
-          # Extract package name and version from filename (format: PackageName.Version.nupkg)
           if ($fileName -match '^(.+?)\.(\d+\.\d+\.\d+.*?)\.nupkg$') {
             $pkgName = $matches[1]
             $pkgVersion = $matches[2]
@@ -284,101 +262,24 @@ jobs:
             exit 1
           }
 
-      - name: Deploy package to Orchestrator Prod
+      - name: Simulate PROD Deployment
         shell: pwsh
         run: |
-          $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
-          Write-Host "Promoting to PROD after PR merge to main"
-          Write-Host "Deploying from: $dist"
-          Get-ChildItem $dist
-
-          $cmdOutput = uipcli package deploy `
-            $dist `
-            "${{ secrets.UIP_ORCH_URL }}" `
-            "${{ secrets.UIP_TENANT_NAME }}" `
-            -A "${{ secrets.UIP_ORG_NAME }}" `
-            -I "${{ secrets.UIP_CLIENT_ID }}" `
-            -S '${{ secrets.UIP_CLIENT_SECRET }}' `
-            --applicationScope '${{ secrets.UIP_APP_SCOPE }}' `
-            -o "${{ secrets.UIP_FOLDER_PROD }}" `
-            2>&1
-
-          $exitCode = $LASTEXITCODE
-
-          Write-Host "uipcli exit code (PROD): $exitCode"
-          Write-Host "uipcli raw output (PROD):"
-          Write-Host $cmdOutput
-
-          if ($exitCode -ne 0) {
-            if ($cmdOutput -match "Package already exists") {
-              Write-Host "✅ Package already exists in PROD folder - this is expected."
-              Write-Host "The package version ${{ steps.pkg-info.outputs.package_version }} is available in PROD."
-              Write-Host "If you have a Process/Release configured, you can update it manually in Orchestrator to use this version."
-              exit 0
-            } else {
-              Write-Error "PROD deploy failed with an unexpected error. See uipcli output above."
-              exit $exitCode
-            }
-          } else {
-            Write-Host "✅ Package successfully deployed to PROD folder!"
-            Write-Host "Package: ${{ steps.pkg-info.outputs.package_name }}"
-            Write-Host "Version: ${{ steps.pkg-info.outputs.package_version }}"
-            Write-Host "Next step: Update your Process/Release in Orchestrator to use this version."
-          }
-
-      - name: Update Process in Prod folder via Orchestrator API
-        shell: pwsh
-        run: |
-          Write-Host "Updating process in PROD folder to use new package version..."
+          Write-Host "=========================================="
+          Write-Host "PROD DEPLOYMENT SIMULATION"
+          Write-Host "=========================================="
+          Write-Host ""
+          Write-Host "Package successfully validated in DEV environment"
           Write-Host "Package: ${{ steps.pkg-info.outputs.package_name }}"
           Write-Host "Version: ${{ steps.pkg-info.outputs.package_version }}"
-          
-          # Get OAuth token
-          $tokenUrl = "${{ secrets.UIP_ORCH_URL }}/identity_/connect/token"
-          $tokenBody = @{
-            grant_type = "client_credentials"
-            client_id = "${{ secrets.UIP_CLIENT_ID }}"
-            client_secret = "${{ secrets.UIP_CLIENT_SECRET }}"
-            scope = "${{ secrets.UIP_APP_SCOPE }}"
-          }
-          
-          Write-Host "Getting OAuth token..."
-          $tokenResponse = Invoke-RestMethod -Uri $tokenUrl -Method Post -Body $tokenBody -ContentType "application/x-www-form-urlencoded"
-          $accessToken = $tokenResponse.access_token
-          Write-Host "Token acquired successfully"
-          
-          # Set headers
-          $headers = @{
-            "Authorization" = "Bearer $accessToken"
-            "Content-Type" = "application/json"
-            "X-UIPATH-TenantName" = "${{ secrets.UIP_TENANT_NAME }}"
-            "X-UIPATH-OrganizationUnitId" = "${{ secrets.UIP_FOLDER_PROD }}"
-          }
-          
-          # Get existing releases to find the one to update
-          $releasesUrl = "${{ secrets.UIP_ORCH_URL }}/${{ secrets.UIP_ORG_NAME }}/${{ secrets.UIP_TENANT_NAME }}/orchestrator_/odata/Releases"
-          Write-Host "Fetching existing releases..."
-          $releases = Invoke-RestMethod -Uri $releasesUrl -Method Get -Headers $headers
-          
-          # Find the release with matching process name
-          $targetRelease = $releases.value | Where-Object { $_.ProcessKey -eq "${{ steps.pkg-info.outputs.package_name }}" } | Select-Object -First 1
-          
-          if ($targetRelease) {
-            Write-Host "Found existing release: $($targetRelease.Name) (Key: $($targetRelease.Key))"
-            Write-Host "Current version: $($targetRelease.ProcessVersion)"
-            
-            # Update the release to use new package version
-            $updateUrl = "${{ secrets.UIP_ORCH_URL }}/${{ secrets.UIP_ORG_NAME }}/${{ secrets.UIP_TENANT_NAME }}/orchestrator_/odata/Releases($($targetRelease.Id))"
-            $updateBody = @{
-              ProcessKey = "${{ steps.pkg-info.outputs.package_name }}"
-              ProcessVersion = "${{ steps.pkg-info.outputs.package_version }}"
-            } | ConvertTo-Json
-            
-            Write-Host "Updating release to version ${{ steps.pkg-info.outputs.package_version }}..."
-            $updateResponse = Invoke-RestMethod -Uri $updateUrl -Method Patch -Headers $headers -Body $updateBody
-            Write-Host "✅ Release updated successfully!"
-          } else {
-            Write-Warning "No existing release found for process '${{ steps.pkg-info.outputs.package_name }}' in PROD folder."
-            Write-Host "You may need to create the release manually in Orchestrator."
-            Write-Host "The package is available in the PROD folder and ready to use."
-          }
+          Write-Host ""
+          Write-Host "This step would typically:"
+          Write-Host "  1. Publish the package to a separate PROD Tenant"
+          Write-Host "  2. Update the relevant Process to use the new Package version"
+          Write-Host ""
+          Write-Host "Due to UiPath Community License limitations, this demo is"
+          Write-Host "unable to replicate that step. In a real enterprise setup,"
+          Write-Host "you would have separate DEV and PROD tenants for proper"
+          Write-Host "environment isolation."
+          Write-Host ""
+          Write-Host "=========================================="
