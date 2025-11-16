@@ -82,6 +82,8 @@ jobs:
           uipcli package analyze $projectPath --stopOnRuleViolation --treatWarningsAsErrors --ignoredRules ST-USG-034
 
   publish-dev:
+
+
     name: Publish to Orchestrator Dev
     runs-on: windows-latest
     needs: analyze
@@ -105,6 +107,30 @@ jobs:
         with:
           name: uipath-package
           path: dist
+
+      - name: Debug Orchestrator config and dist contents
+        shell: pwsh
+        env:
+          ORCH_URL: ${{ secrets.UIP_ORCH_URL }}
+          TENANT: ${{ secrets.UIP_TENANT_NAME }}
+          ORG: ${{ secrets.UIP_ORG_NAME }}
+          APP_SCOPE: ${{ secrets.UIP_APP_SCOPE }}
+          FOLDER_DEV: ${{ secrets.UIP_FOLDER_DEV }}
+        run: |
+          $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
+          Write-Host "Dist path: $dist"
+          Write-Host "Dist exists: $(Test-Path $dist)"
+          if (Test-Path $dist) {
+            Write-Host "Dist contents:"
+            Get-ChildItem $dist
+          }
+
+          Write-Host "ORCH_URL length: $($env:ORCH_URL.Length)"
+          Write-Host "TENANT length:   $($env:TENANT.Length)"
+          Write-Host "ORG length:      $($env:ORG.Length)"
+          Write-Host "APP_SCOPE length:$($env:APP_SCOPE.Length)"
+          Write-Host "FOLDER_DEV:      $($env:FOLDER_DEV)"
+
 
       - name: Deploy package to Orchestrator Dev
         shell: pwsh
