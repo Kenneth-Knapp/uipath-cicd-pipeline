@@ -132,18 +132,22 @@ jobs:
           Write-Host "FOLDER_DEV:      $($env:FOLDER_DEV)"
 
 
-      - name: Deploy package to Orchestrator Dev
+      - name: Deploy package to Orchestrator Dev (hardcoded for debug)
         shell: pwsh
         run: |
           $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
+          Write-Host "Deploying from: $dist"
+          Get-ChildItem $dist
 
           uipcli package deploy $dist `
-            "${{ secrets.UIP_ORCH_URL }}" `
-            "${{ secrets.UIP_TENANT_NAME }}" `
-            -A "${{ secrets.UIP_ORG_NAME }}" `
+            "https://cloud.uipath.com/" `
+            "DefaultTenant" `
+            -A "kennyhwqsbvm" `
             -I "${{ secrets.UIP_CLIENT_ID }}" `
             -S "${{ secrets.UIP_CLIENT_SECRET }}" `
-            --applicationScope "${{ secrets.UIP_APP_SCOPE }}" `
-            -o "${{ secrets.UIP_FOLDER_DEV }}"
+            --applicationScope "OR.Folders OR.Execution OR.Jobs OR.Machines.Read OR.Robots.Read OR.Assets OR.Settings.Read" `
+            -o "DEV"
+
+
 
 
