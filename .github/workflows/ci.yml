@@ -82,8 +82,6 @@ jobs:
           uipcli package analyze $projectPath --stopOnRuleViolation --treatWarningsAsErrors --ignoredRules ST-USG-034
 
   publish-dev:
-
-
     name: Publish to Orchestrator Dev
     runs-on: windows-latest
     needs: analyze
@@ -131,23 +129,39 @@ jobs:
           Write-Host "APP_SCOPE length:$($env:APP_SCOPE.Length)"
           Write-Host "FOLDER_DEV:      $($env:FOLDER_DEV)"
 
-
-      - name: Deploy package to Orchestrator Dev (hardcoded for debug)
+      - name: Deploy package to Orchestrator Dev (fail on duplicate version)
         shell: pwsh
         run: |
           $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
           Write-Host "Deploying from: $dist"
           Get-ChildItem $dist
 
-          uipcli package deploy $dist `
-            "https://cloud.uipath.com/" `
-            "DefaultTenant" `
-            -A "kennyhwqsbvm" `
-            -I "fb4fbd6f-f74d-4834-ac7d-0b6c87e229cc" `
+          $cmdOutput = uipcli package deploy `
+            $dist `
+            "${{ secrets.UIP_ORCH_URL }}" `
+            "${{ secrets.UIP_TENANT_NAME }}" `
+            -A "${{ secrets.UIP_ORG_NAME }}" `
+            -I "${{ secrets.UIP_CLIENT_ID }}" `
             -S '${{ secrets.UIP_CLIENT_SECRET }}' `
-            --applicationScope "OR.Folders OR.Execution OR.Jobs OR.Machines.Read OR.Robots.Read OR.Assets OR.Settings.Read" `
-            -o "DEV"
+            --applicationScope '${{ secrets.UIP_APP_SCOPE }}' `
+            -o "${{ secrets.UIP_FOLDER_DEV }}" `
+            2>&1
 
+          $exitCode = $LASTEXITCODE
+
+          Write-Host "uipcli exit code: $exitCode"
+          Write-Host "uipcli raw output:"
+          Write-Host $cmdOutput
+
+          if ($exitCode -ne 0) {
+            if ($cmdOutput -match "Package already exists") {
+              Write-Error "Deploy failed: package version already exists in Orchestrator. Update the version in project.json, repack, and push again."
+              exit 1
+            } else {
+              Write-Error "Deploy failed with an unexpected error. See uipcli output above."
+              exit $exitCode
+            }
+          }
 
 
 
