@@ -2,9 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: 
+      - '**'  # Trigger on push to ANY branch
+      - '!main'  # But NOT main (we'll handle main via PR merge)
   pull_request:
-    types: [closed]  # Only trigger when PR is closed
+    types: [closed]  # Trigger when PR is closed (merged or not)
 
 jobs:
   smoke:
@@ -86,7 +88,7 @@ jobs:
     name: Publish to Orchestrator Dev
     runs-on: windows-latest
     needs: analyze
-    if: github.event_name == 'push'  # Only run on push to main
+    if: github.event_name == 'push' && github.ref != 'refs/heads/main'
 
     steps:
       - name: Checkout
@@ -118,6 +120,10 @@ jobs:
           FOLDER_DEV: ${{ secrets.UIP_FOLDER_DEV }}
         run: |
           $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
+          Write-Host "=== DEBUG INFO ==="
+          Write-Host "Event name: ${{ github.event_name }}"
+          Write-Host "Branch ref: ${{ github.ref }}"
+          Write-Host "Branch name: ${{ github.ref_name }}"
           Write-Host "Dist path: $dist"
           Write-Host "Dist exists: $(Test-Path $dist)"
           if (Test-Path $dist) {
@@ -135,6 +141,7 @@ jobs:
         shell: pwsh
         run: |
           $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
+          Write-Host "Deploying to DEV from feature branch: ${{ github.ref_name }}"
           Write-Host "Deploying from: $dist"
           Get-ChildItem $dist
 
@@ -169,7 +176,7 @@ jobs:
     name: Promote to Orchestrator Prod
     runs-on: windows-latest
     needs: analyze
-    if: github.event.pull_request.merged == true  # Only run on merged PRs
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
     environment: prod
 
     steps:
@@ -224,7 +231,8 @@ jobs:
         shell: pwsh
         run: |
           $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
-          Write-Host "Deploying to PROD from: $dist"
+          Write-Host "Promoting to PROD after PR merge to main"
+          Write-Host "Deploying from: $dist"
           Get-ChildItem $dist
 
           $cmdOutput = uipcli package deploy `
