@@ -144,7 +144,7 @@ jobs:
             "DefaultTenant" `
             -A "kennyhwqsbvm" `
             -I "fb4fbd6f-f74d-4834-ac7d-0b6c87e229cc `
-            -S "FuRREI3%c_v)ZzlIJ_BUSYjZ$kmkJy7z3WKfi~DUZfd2b4wfKGNEvYMaffh^DA1d" `
+            -S '${{ secrets.UIP_CLIENT_SECRET }}'
             --applicationScope "OR.Folders OR.Execution OR.Jobs OR.Machines.Read OR.Robots.Read OR.Assets OR.Settings.Read" `
             -o "DEV"
 
