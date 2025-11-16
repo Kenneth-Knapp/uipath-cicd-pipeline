@@ -163,5 +163,66 @@ jobs:
             }
           }
 
+  publish-prod:
+    name: Publish to Orchestrator Prod
+    runs-on: windows-latest
+    needs: publish-dev
+    if: github.event_name == 'pull_request'
+    environment: prod
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup UiPath CLI
+        uses: Mikael-RnD/setup-uipath@v2
+        with:
+          version: 24.12.9111.31003
+
+      - name: Download UiPath package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: uipath-package
+          path: dist
+
+      - name: Deploy package to Orchestrator Prod (fail on duplicate version)
+        shell: pwsh
+        run: |
+          $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
+          Write-Host "Deploying to PROD from: $dist"
+          Get-ChildItem $dist
+
+          $cmdOutput = uipcli package deploy `
+            $dist `
+            "${{ secrets.UIP_ORCH_URL }}" `
+            "${{ secrets.UIP_TENANT_NAME }}" `
+            -A "${{ secrets.UIP_ORG_NAME }}" `
+            -I "${{ secrets.UIP_CLIENT_ID }}" `
+            -S '${{ secrets.UIP_CLIENT_SECRET }}' `
+            --applicationScope '${{ secrets.UIP_APP_SCOPE }}' `
+            -o "${{ secrets.UIP_FOLDER_PROD }}" `
+            2>&1
+
+          $exitCode = $LASTEXITCODE
+
+          Write-Host "uipcli exit code (PROD): $exitCode"
+          Write-Host "uipcli raw output (PROD):"
+          Write-Host $cmdOutput
+
+          if ($exitCode -ne 0) {
+            if ($cmdOutput -match "Package already exists") {
+              Write-Error "PROD deploy failed: package version already exists in Orchestrator. Update the version in project.json, repack, and push again."
+              exit 1
+            } else {
+              Write-Error "PROD deploy failed with an unexpected error. See uipcli output above."
+              exit $exitCode
+            }
+          }
+
 
 
