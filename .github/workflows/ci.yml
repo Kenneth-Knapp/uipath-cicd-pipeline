@@ -6,25 +6,10 @@ on:
       - '**'  # Trigger on push to ANY branch
       - '!main'  # But NOT main (we'll handle main via PR merge)
   pull_request:
-    types: [closed]  # Trigger when PR is closed (merged or not)
+    branches: [ "main" ]
+    types: [closed]  # Trigger when PR to main is closed
 
 jobs:
-  smoke:
-    name: CI smoke
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Show repo structure
-        run: |
-          echo "Listing repo..."
-          dir
-
-      - name: Placeholder for UiPath steps
-        run: |
-          echo "✅ CI is wired. UiPath packaging/analysis will be added next."
-
   pack:
     name: Package UiPath Project
     runs-on: windows-latest
@@ -175,7 +160,6 @@ jobs:
   promote-to-prod:
     name: Promote to Orchestrator Prod
     runs-on: windows-latest
-    needs: analyze
     if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
     environment: prod
 
@@ -193,13 +177,65 @@ jobs:
         with:
           version: 24.12.9111.31003
 
-      - name: Download UiPath package artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: uipath-package
-          path: dist
+      - name: Get the workflow run from the feature branch
+        id: get-run
+        shell: pwsh
+        run: |
+          $headSha = "${{ github.event.pull_request.head.sha }}"
+          Write-Host "Looking for workflow run with SHA: $headSha"
+          
+          $runsUrl = "https://api.github.com/repos/${{ github.repository }}/actions/runs?event=push&status=success&head_sha=$headSha"
+          $headers = @{
+            "Authorization" = "Bearer ${{ github.token }}"
+            "Accept" = "application/vnd.github+json"
+          }
+          
+          $runs = Invoke-RestMethod -Uri $runsUrl -Headers $headers
+          $targetRun = $runs.workflow_runs | Where-Object { $_.name -eq "CI" } | Select-Object -First 1
+          
+          if ($targetRun) {
+            Write-Host "Found workflow run ID: $($targetRun.id)"
+            echo "run_id=$($targetRun.id)" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Error "Could not find successful workflow run for this commit. Package may not have been built."
+            exit 1
+          }
 
-      - name: Get package info
+      - name: Download artifact from previous workflow run
+        shell: pwsh
+        run: |
+          $runId = "${{ steps.get-run.outputs.run_id }}"
+          Write-Host "Downloading artifact from run ID: $runId"
+          
+          $artifactsUrl = "https://api.github.com/repos/${{ github.repository }}/actions/runs/$runId/artifacts"
+          $headers = @{
+            "Authorization" = "Bearer ${{ github.token }}"
+            "Accept" = "application/vnd.github+json"
+          }
+          
+          $artifacts = Invoke-RestMethod -Uri $artifactsUrl -Headers $headers
+          $packageArtifact = $artifacts.artifacts | Where-Object { $_.name -eq "uipath-package" } | Select-Object -First 1
+          
+          if (-not $packageArtifact) {
+            Write-Error "Could not find 'uipath-package' artifact in workflow run $runId"
+            exit 1
+          }
+          
+          Write-Host "Found artifact ID: $($packageArtifact.id)"
+          Write-Host "Downloading from: $($packageArtifact.archive_download_url)"
+          
+          $outputZip = "artifact.zip"
+          Invoke-WebRequest -Uri $packageArtifact.archive_download_url -Headers $headers -OutFile $outputZip
+          
+          $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Expand-Archive -Path $outputZip -DestinationPath $dist -Force
+          
+          Write-Host "Artifact downloaded and extracted successfully"
+          Write-Host "Contents of dist folder:"
+          Get-ChildItem $dist
+
+      - name: Get package info for display
         id: pkg-info
         shell: pwsh
         run: |
@@ -214,7 +250,6 @@ jobs:
           $fileName = $nupkg.Name
           Write-Host "Package file: $fileName"
           
-          # Extract package name and version from filename (format: PackageName.Version.nupkg)
           if ($fileName -match '^(.+?)\.(\d+\.\d+\.\d+.*?)\.nupkg$') {
             $pkgName = $matches[1]
             $pkgVersion = $matches[2]
@@ -227,69 +262,24 @@ jobs:
             exit 1
           }
 
-      - name: Deploy package to Orchestrator Prod
+      - name: Simulate PROD Deployment
         shell: pwsh
         run: |
-          $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
-          Write-Host "Promoting to PROD after PR merge to main"
-          Write-Host "Deploying from: $dist"
-          Get-ChildItem $dist
-
-          $cmdOutput = uipcli package deploy `
-            $dist `
-            "${{ secrets.UIP_ORCH_URL }}" `
-            "${{ secrets.UIP_TENANT_NAME }}" `
-            -A "${{ secrets.UIP_ORG_NAME }}" `
-            -I "${{ secrets.UIP_CLIENT_ID }}" `
-            -S '${{ secrets.UIP_CLIENT_SECRET }}' `
-            --applicationScope '${{ secrets.UIP_APP_SCOPE }}' `
-            -o "${{ secrets.UIP_FOLDER_PROD }}" `
-            2>&1
-
-          $exitCode = $LASTEXITCODE
-
-          Write-Host "uipcli exit code (PROD): $exitCode"
-          Write-Host "uipcli raw output (PROD):"
-          Write-Host $cmdOutput
-
-          if ($exitCode -ne 0) {
-            if ($cmdOutput -match "Package already exists") {
-              Write-Warning "Package already exists in PROD folder. This is expected for promotion."
-              # Package already exists - this is fine for PROD promotion
-              exit 0
-            } else {
-              Write-Error "PROD deploy failed with an unexpected error. See uipcli output above."
-              exit $exitCode
-            }
-          }
-
-      - name: Update Process in Prod folder
-        shell: pwsh
-        run: |
-          Write-Host "Updating process in PROD folder to use new package version..."
+          Write-Host "=========================================="
+          Write-Host "PROD DEPLOYMENT SIMULATION"
+          Write-Host "=========================================="
+          Write-Host ""
+          Write-Host "Package successfully validated in DEV environment"
           Write-Host "Package: ${{ steps.pkg-info.outputs.package_name }}"
           Write-Host "Version: ${{ steps.pkg-info.outputs.package_version }}"
-          
-          # Use UiPath CLI to update the process
-          # Note: You may need to use Orchestrator API directly if CLI doesn't support this
-          # This is a placeholder - adjust based on your process name and requirements
-          
-          $updateOutput = uipcli process update `
-            "${{ secrets.UIP_ORCH_URL }}" `
-            "${{ secrets.UIP_TENANT_NAME }}" `
-            -A "${{ secrets.UIP_ORG_NAME }}" `
-            -I "${{ secrets.UIP_CLIENT_ID }}" `
-            -S '${{ secrets.UIP_CLIENT_SECRET }}' `
-            --applicationScope '${{ secrets.UIP_APP_SCOPE }}' `
-            -o "${{ secrets.UIP_FOLDER_PROD }}" `
-            --processName "${{ steps.pkg-info.outputs.package_name }}" `
-            --packageVersion "${{ steps.pkg-info.outputs.package_version }}" `
-            2>&1
-          
-          Write-Host "Process update output:"
-          Write-Host $updateOutput
-          
-          if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Process update command may not be available in CLI. You may need to use Orchestrator API directly."
-            Write-Host "Package has been deployed to PROD folder. Manual process update may be required."
-          }
+          Write-Host ""
+          Write-Host "This step would typically:"
+          Write-Host "  1. Publish the package to a separate PROD Tenant"
+          Write-Host "  2. Update the relevant Process to use the new Package version"
+          Write-Host ""
+          Write-Host "Due to UiPath Community License limitations, this demo is"
+          Write-Host "unable to replicate that step. In a real enterprise setup,"
+          Write-Host "you would have separate DEV and PROD tenants for proper"
+          Write-Host "environment isolation."
+          Write-Host ""
+          Write-Host "=========================================="
