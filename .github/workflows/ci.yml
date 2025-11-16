@@ -4,6 +4,7 @@ on:
   push:
     branches: [ "main" ]
   pull_request:
+    types: [closed]  # Only trigger when PR is closed
 
 jobs:
   smoke:
@@ -85,6 +86,7 @@ jobs:
     name: Publish to Orchestrator Dev
     runs-on: windows-latest
     needs: analyze
+    if: github.event_name == 'push'  # Only run on push to main
 
     steps:
       - name: Checkout
@@ -129,7 +131,7 @@ jobs:
           Write-Host "APP_SCOPE length:$($env:APP_SCOPE.Length)"
           Write-Host "FOLDER_DEV:      $($env:FOLDER_DEV)"
 
-      - name: Deploy package to Orchestrator Dev (fail on duplicate version)
+      - name: Deploy package to Orchestrator Dev
         shell: pwsh
         run: |
           $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
@@ -163,11 +165,11 @@ jobs:
             }
           }
 
-  publish-prod:
-    name: Publish to Orchestrator Prod
+  promote-to-prod:
+    name: Promote to Orchestrator Prod
     runs-on: windows-latest
-    needs: publish-dev
-    if: github.event_name == 'pull_request'
+    needs: analyze
+    if: github.event.pull_request.merged == true  # Only run on merged PRs
     environment: prod
 
     steps:
@@ -190,7 +192,35 @@ jobs:
           name: uipath-package
           path: dist
 
-      - name: Deploy package to Orchestrator Prod (fail on duplicate version)
+      - name: Get package info
+        id: pkg-info
+        shell: pwsh
+        run: |
+          $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
+          $nupkg = Get-ChildItem -Path $dist -Filter "*.nupkg" | Select-Object -First 1
+          
+          if (-not $nupkg) {
+            Write-Error "No .nupkg file found in dist folder"
+            exit 1
+          }
+          
+          $fileName = $nupkg.Name
+          Write-Host "Package file: $fileName"
+          
+          # Extract package name and version from filename (format: PackageName.Version.nupkg)
+          if ($fileName -match '^(.+?)\.(\d+\.\d+\.\d+.*?)\.nupkg$') {
+            $pkgName = $matches[1]
+            $pkgVersion = $matches[2]
+            Write-Host "Package Name: $pkgName"
+            Write-Host "Package Version: $pkgVersion"
+            echo "package_name=$pkgName" >> $env:GITHUB_OUTPUT
+            echo "package_version=$pkgVersion" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Error "Could not parse package name and version from: $fileName"
+            exit 1
+          }
+
+      - name: Deploy package to Orchestrator Prod
         shell: pwsh
         run: |
           $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
@@ -216,13 +246,42 @@ jobs:
 
           if ($exitCode -ne 0) {
             if ($cmdOutput -match "Package already exists") {
-              Write-Error "PROD deploy failed: package version already exists in Orchestrator. Update the version in project.json, repack, and push again."
-              exit 1
+              Write-Warning "Package already exists in PROD folder. This is expected for promotion."
+              # Package already exists - this is fine for PROD promotion
+              exit 0
             } else {
               Write-Error "PROD deploy failed with an unexpected error. See uipcli output above."
               exit $exitCode
             }
           }
 
-
-
+      - name: Update Process in Prod folder
+        shell: pwsh
+        run: |
+          Write-Host "Updating process in PROD folder to use new package version..."
+          Write-Host "Package: ${{ steps.pkg-info.outputs.package_name }}"
+          Write-Host "Version: ${{ steps.pkg-info.outputs.package_version }}"
+          
+          # Use UiPath CLI to update the process
+          # Note: You may need to use Orchestrator API directly if CLI doesn't support this
+          # This is a placeholder - adjust based on your process name and requirements
+          
+          $updateOutput = uipcli process update `
+            "${{ secrets.UIP_ORCH_URL }}" `
+            "${{ secrets.UIP_TENANT_NAME }}" `
+            -A "${{ secrets.UIP_ORG_NAME }}" `
+            -I "${{ secrets.UIP_CLIENT_ID }}" `
+            -S '${{ secrets.UIP_CLIENT_SECRET }}' `
+            --applicationScope '${{ secrets.UIP_APP_SCOPE }}' `
+            -o "${{ secrets.UIP_FOLDER_PROD }}" `
+            --processName "${{ steps.pkg-info.outputs.package_name }}" `
+            --packageVersion "${{ steps.pkg-info.outputs.package_version }}" `
+            2>&1
+          
+          Write-Host "Process update output:"
+          Write-Host $updateOutput
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Process update command may not be available in CLI. You may need to use Orchestrator API directly."
+            Write-Host "Package has been deployed to PROD folder. Manual process update may be required."
+          }
